@@ -19,7 +19,7 @@
 #define realloc mm_realloc
 #define calloc mm_calloc
 #endif /* def DRIVER */
-#define Debugx
+#define Debug
 /*
  * If NEXT_FIT defined use next fit search, else use first-fit search
  */
@@ -80,16 +80,16 @@ static void delete_list(void *bp);
 int mm_init(void)
 {
     /* Create the initial empty heap */
-    if ((heap_listp = mem_sbrk(5*WSIZE)) == (void *)-1)
+    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
         return -1;
     basis=(long)heap_listp;
     PUT(heap_listp, 0);                          /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), 0); 		/* head pointer of the explicit free list*/
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
-    PUT(heap_listp + (3*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
-    PUT(heap_listp + (4*WSIZE), PACK(0, 1));     /* Epilogue header */
+    PUT(heap_listp + (3*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
+    PUT(heap_listp + (4*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
+    PUT(heap_listp + (5*WSIZE), PACK(0, 1));     /* Epilogue header */
     root=heap_listp+WSIZE;   //initiate head of the list
-    heap_listp += (3*WSIZE);
+    heap_listp += (4*WSIZE);
 #ifdef NEXT_FIT
     rover = heap_listp;
 #endif
@@ -205,21 +205,6 @@ void *realloc(void *ptr, size_t size)
     return newptr;
 }
 
-/*
- * mm_checkheap - Check the heap for correctness. Helpful hint: You
- *                can call this function using mm_checkheap(__LINE__);
- *                to identify the line number of the call site.
- */
-void mm_checkheap(int lineno)
-{
-    printf("We are at line %d\n",lineno);
-    void *bp;
-    
-    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = W2D(GET(AD_NEXT(bp)))) {
-        printf("address:%p, size :%lu\n",bp,GET_SIZE(HDRP(bp)));
-    }
-    printf("Over-------------------\n");
-}
 
 /*
  * The remaining routines are internal helper routines
@@ -256,7 +241,7 @@ static void *extend_heap(size_t words)
  * coalesce - Boundary tag coalescing. Return ptr to coalesced block
  */
 static void *coalesce(void *bp)
-{
+{	bp=W2D(bp);
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
@@ -311,33 +296,35 @@ static void *coalesce(void *bp)
     1.A small trick to reduce operations by first_node->pre=NULL
     2.obey "LIFO"    */
 inline void insert_list(void *bp){
+	bp=W2D(bp);
     char *t=GET(root);
     if(t==NULL){
         PUT(root, bp);
     }
     else{
         PUT(root, bp);    //root->next=bp
-        PUT(AD_NEXT(bp), t);   //bp->next=t
-        PUT(AD_PREV(t), bp);   //t->pre=bp;
+        PUT(W2D(AD_NEXT(bp)), t);   //bp->next=t
+        PUT(W2D(AD_PREV(t)), bp);   //t->pre=bp;
     }
 }
 
 /* delete_list - delete a node from the list*/
 inline void delete_list(void *bp){
+    bp=W2D(bp);
     char * prevp=GET(AD_PREV(bp));
     char * nextp=GET(AD_NEXT(bp));
     //if it is the first node
     if(prevp==NULL){
-        PUT(root, nextp);
-        if(nextp!=NULL) PUT(AD_PREV(nextp), NULL);
+        PUT(root, D2W(nextp));
+        if(nextp!=NULL) PUT(W2D(AD_PREV(nextp)), NULL);
     }
     else{
-        PUT(AD_NEXT(prevp), nextp);
-        if(nextp!=NULL) PUT(AD_PREV(nextp), prevp);
+        PUT(W2D(AD_NEXT(prevp)), D2W(nextp));
+        if(nextp!=NULL) PUT(W2D(AD_PREV(nextp)), D2W(prevp));
     }
     
-    PUT(AD_PREV(bp), NULL);
-    PUT(AD_NEXT(bp), NULL);
+    PUT(W2D(AD_PREV(bp)), NULL);
+    PUT(W2D(AD_NEXT(bp)), NULL);
 }
 
 
@@ -347,6 +334,7 @@ inline void delete_list(void *bp){
  */
 static void place(void *bp, size_t asize)
 {
+    bp=W2D(bp);//change!!
     size_t csize = GET_SIZE(HDRP(bp));
     if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(csize-asize, 0));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
@@ -356,7 +344,7 @@ static void place(void *bp, size_t asize)
         PUT(FTRP(bp), PACK(asize, 1));
     }
     else {
-        delete_list(bp);
+        delete_list(D2W(bp));
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
@@ -389,7 +377,7 @@ static void *find_fit(size_t asize)
     /* First-fit search */
     void *bp;
     
-    for (bp=W2D(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = W2D(GET(((AD_NEXT(bp)))))) {
+    for (bp=W2D(GET(root)); bp!=W2D(0) && GET_SIZE(HDRP(bp)) > 0; bp = W2D(GET(((AD_NEXT(bp)))))) {
         if ((asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
@@ -398,3 +386,20 @@ static void *find_fit(size_t asize)
 #endif
 }
 
+/*
+ * mm_checkheap - Check the heap for correctness. Helpful hint: You
+ *                can call this function using mm_checkheap(__LINE__);
+ *                to identify the line number of the call site.
+ */
+void mm_checkheap(int lineno)
+{
+    printf("We are at line %d\n",lineno);
+    void *bp;
+    
+    for (bp=W2D(GET(root)); bp!=W2D(0) && GET_SIZE(HDRP(bp)) > 0; ) {
+        printf("address:%p\n",bp);
+	bp = W2D(GET(AD_NEXT(bp)));
+printf("address:%p\n",bp);
+    }
+    printf("Over-------------------\n");
+}
