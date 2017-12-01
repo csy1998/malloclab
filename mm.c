@@ -19,12 +19,14 @@
 #define realloc mm_realloc
 #define calloc mm_calloc
 #endif /* def DRIVER */
-#define Debug
+#define Debugx
 /*
  * If NEXT_FIT defined use next fit search, else use first-fit search
  */
 #define NEXT_FITx
-
+static long basis=0;
+#define W2D(bp)  (char *)(basis+bp)
+#define D2W(bp)  (bp-basis)
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
 #define DSIZE       8       /* Double word size (bytes) */
@@ -56,6 +58,7 @@
 
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */
+
 #ifdef NEXT_FIT
 static char *rover;           /* Next fit rover */
 #endif
@@ -79,6 +82,7 @@ int mm_init(void)
     /* Create the initial empty heap */
     if ((heap_listp = mem_sbrk(5*WSIZE)) == (void *)-1)
         return -1;
+    basis=(long)heap_listp;
     PUT(heap_listp, 0);                          /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), 0); 		/* head pointer of the explicit free list*/
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
@@ -211,8 +215,8 @@ void mm_checkheap(int lineno)
     printf("We are at line %d\n",lineno);
     void *bp;
     
-    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = GET(AD_NEXT(bp))) {
-        printf("address:%p, size :%d\n",bp,GET_SIZE(HDRP(bp)));
+    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = W2D(GET(AD_NEXT(bp)))) {
+        printf("address:%p, size :%lu\n",bp,GET_SIZE(HDRP(bp)));
     }
     printf("Over-------------------\n");
 }
@@ -385,7 +389,7 @@ static void *find_fit(size_t asize)
     /* First-fit search */
     void *bp;
     
-    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = GET(AD_NEXT(bp))) {
+    for (bp=W2D(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = W2D(GET(((AD_NEXT(bp)))))) {
         if ((asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
