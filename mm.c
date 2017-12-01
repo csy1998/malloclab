@@ -19,7 +19,7 @@
 #define realloc mm_realloc
 #define calloc mm_calloc
 #endif /* def DRIVER */
-
+#define Debug
 /*
  * If NEXT_FIT defined use next fit search, else use first-fit search
  */
@@ -93,6 +93,9 @@ int mm_init(void)
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/DSIZE) == NULL)
         return -1;
+#ifdef Debug
+    mm_checkheap(__LINE__);
+#endif
     return 0;
 }
 
@@ -129,6 +132,9 @@ void *malloc(size_t size)
     if ((bp = extend_heap(extendsize/DSIZE)) == NULL)
         return NULL;
     place(bp, asize);
+#ifdef Debug
+    mm_checkheap(__LINE__);
+#endif
     return bp;
 }
 
@@ -152,6 +158,9 @@ void free(void *bp)
     /*initiate the block before calling coalesce()*/
     PUT(AD_PREV(bp), NULL);
     PUT(AD_NEXT(bp), NULL);
+#ifdef Debug
+    mm_checkheap(__LINE__);
+#endif
     coalesce(bp);
 }
 
@@ -282,6 +291,9 @@ static void *coalesce(void *bp)
         bp = PREV_BLKP(bp);
     }
     insert_list(bp);
+#ifdef Debug
+    mm_checkheap(__LINE__);
+#endif
 #ifdef NEXT_FIT
     /* Make sure the rover isn't pointing into the free block */
     /* that we just coalesced */
@@ -344,6 +356,9 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
+#ifdef Debug
+    mm_checkheap(__LINE__);
+#endif
 }
 
 /*
