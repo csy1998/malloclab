@@ -66,6 +66,10 @@ static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
 static char * root;
 static void insert_list(void *bp);  //inserted into the LIFO list
+static void delete_list(void *bp);
+
+/*Noted that first_node->pre=NULL, last_node->next=NULL*/
+
 /*
  * mm_init - Initialize the memory manager
  */
@@ -86,7 +90,7 @@ int mm_init(void)
 #endif
     
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
+    if (extend_heap(CHUNKSIZE/DSIZE) == NULL)
         return -1;
     return 0;
 }
@@ -139,12 +143,14 @@ void free(void *bp)
     if (heap_listp == 0){
         mm_init();
     }
-
+    
     
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     
-   
+    /*initiate the block before calling coalesce()*/
+    PUT(AD_PREV(bp), NULL);
+    PUT(AD_NEXT(bp), NULL);
     coalesce(bp);
 }
 
@@ -208,25 +214,20 @@ static void *extend_heap(size_t words)
     size_t size;
     
     /* Allocate an even number of words to maintain alignment */
-    size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
+    size = (words % 2) ? (words+1) * DSIZE : words * DSIZE;
     if ((long)(bp = mem_sbrk(size)) == -1)
         return NULL;
-    char *temp=GET(root);
-    if(temp==NULL){
-        PUT(root, bp);
-        PUT(bp+WSIZE,root);
-    }
-    else{
-        PUT(root,bp);     //root->next=bp
-        PUT(bp+WSIZE,root);//bp->pre=root
-        PUT(temp+WSIZE,bp);//temp->pre=bp
-        PUT(bp, temp);     //bp->next=temp
-    }
+    
     /* Initialize free block header/footer and the epilogue header */
     PUT(HDRP(bp), PACK(size, 0));         /* Free block header */
     PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
-
+    
+    
+    
+    /*initiate the block before calling coalesce()*/
+    PUT(AD_PREV(bp), NULL);
+    PUT(AD_NEXT(bp), NULL);
     /* Coalesce if the previous block was free */
     return coalesce(bp);
 }
@@ -240,69 +241,43 @@ static void *coalesce(void *bp)
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
     /*LIFO Policy*/
-    void *temp=GET(root);
+
     if (prev_alloc && next_alloc) {            /* Case 1 */
-        if(temp==NULL){
-            PUT(root, bp);
-            PUT(bp, 0);   //bp->next=NULL
-            PUT(bp+WSIZE,root);
-        }
-        else{
-            PUT(root,bp);     //root->next=bp
-            PUT(bp+WSIZE,root);//bp->pre=root
-            PUT(temp+WSIZE,bp);//temp->pre=bp
-            PUT(bp, temp);     //bp->next=temp
-        }
-        return bp;
+     
+        
     }
     
     else if (prev_alloc && !next_alloc) {      /* Case 2 */
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        delete_list(NEXT_BLKP(bp));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size,0));
         
-        if(temp==NULL){
-            PUT(root, bp);
-            PUT(bp, 0);
-            PUT(bp+WSIZE,root);
-        }
-        else{
-            PUT(root,bp);     //root->next=bp
-            PUT(bp+WSIZE,root);//bp->pre=root
-            PUT(temp+WSIZE,bp);//temp->pre=bp
-            PUT(bp, temp);     //bp->next=temp
-        }
+       
         
     }
     
     else if (!prev_alloc && next_alloc) {      /* Case 3 */
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        delete_list(PREV_BLKP(bp));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        /*change the list*/
-
-        PUT(temp,PREV_BLKP(bp));    //root->next=pre_bp
-        PUT(PREV_BLKP(bp)+WSIZE,temp); //pre_bp->pre=root
-        PUT(PREV_BLKP(bp),AD_NEXT(bp));  //pre_bp->next=bp->next
-        PUT(AD_NEXT(bp)+WSIZE,PREV_BLKP(bp));     //bp->next->pre=pre_bp
+      
         
         bp = PREV_BLKP(bp);
         
     }
     
     else {                                     /* Case 4 */
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
-        GET_SIZE(FTRP(NEXT_BLKP(bp)));
-        /*change the list*/
-        PUT(temp,PREV_BLKP(bp));    //root->next=pre_bp
-        PUT(PREV_BLKP(bp)+WSIZE,temp); //pre_bp->pre=root
-        PUT(PREV_BLKP(bp),AD_NEXT(bp));  //pre_bp->next=bp->next
-        PUT(AD_NEXT(bp)+WSIZE,PREV_BLKP(bp));     //bp->next->pre=pre_bp
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) +GET_SIZE(FTRP(NEXT_BLKP(bp)));
         
+        delete_list(PREV_BLKP(bp));
+        delete_list(NEXT_BLKP(bp));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    insert_list(bp);
 #ifdef NEXT_FIT
     /* Make sure the rover isn't pointing into the free block */
     /* that we just coalesced */
@@ -311,20 +286,40 @@ static void *coalesce(void *bp)
 #endif
     return bp;
 }
-void insert_list(void *bp){
-    char *temp=GET(root);
-    if(temp==NULL){
-        memcpy(root, bp, 4);
-        memcpy(bp,0,4);
+
+/* insert_list - insert a node into the head of the list
+    A small trick to reduce operations by first_node->pre=NULL*/
+inline void insert_list(void *bp){
+    char *t=GET(root);
+    if(t==NULL){
+        PUT(root, bp);
     }
     else{
-        memcpy(bp, root, 4);
-        memcpy(root, bp, 4);
-        memcpy(bp+WSIZE, root, 4);
-        PUT(root,bp);
-        
+        PUT(root, bp);    //root->next=bp
+        PUT(AD_NEXT(bp), t);   //bp->next=t
+        PUT(AD_PREV(t), bp);   //t->pre=bp;
     }
 }
+
+/* delete_list - delete a node from the list*/
+inline void delete_list(void *bp){
+    char * prevp=GET(AD_PREV(bp));
+    char * nextp=GET(AD_NEXT(bp));
+    //if it is the first node
+    if(prevp==NULL){
+        PUT(root, nextp);
+        if(nextp!=NULL) PUT(AD_PREV(nextp), NULL);
+    }
+    else{
+        PUT(AD_NEXT(prevp), nextp);
+        if(nextp!=NULL) PUT(AD_PREV(nextp), prevp);
+    }
+    
+    PUT(AD_PREV(bp), NULL);
+    PUT(AD_NEXT(bp), NULL);
+}
+
+
 /*
  * place - Place block of asize bytes at start of free block bp
  *         and split if remainder would be at least minimum block size
@@ -332,8 +327,7 @@ void insert_list(void *bp){
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
-    
-    if ((csize - asize) >= (3*DSIZE)) {
+    if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(csize-asize, 0));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
         PUT(FTRP(bp), PACK(csize-asize, 0));
         bp = NEXT_BLKP(bp);
@@ -341,6 +335,7 @@ static void place(void *bp, size_t asize)
         PUT(FTRP(bp), PACK(asize, 1));
     }
     else {
+        delete_list(bp);
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
@@ -370,8 +365,8 @@ static void *find_fit(size_t asize)
     /* First-fit search */
     void *bp;
     
-    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = AD_NEXT(bp)) {
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = GET(AD_NEXT(bp))) {
+        if ((asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
     }
