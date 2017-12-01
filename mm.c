@@ -47,6 +47,7 @@
 #define HDRP(bp)       ((char *)(bp) - WSIZE)
 #define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
+
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
@@ -64,8 +65,8 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
-static char * root;
-static void insert_list(void *bp);  //inserted into the LIFO list
+static char * root=NULL;
+static void insert_list(void *bp);
 static void delete_list(void *bp);
 
 /*Noted that first_node->pre=NULL, last_node->next=NULL*/
@@ -125,7 +126,7 @@ void *malloc(size_t size)
     
     /* No fit found. Get more memory and place the block */
     extendsize = MAX(asize,CHUNKSIZE);
-    if ((bp = extend_heap(extendsize/WSIZE)) == NULL)
+    if ((bp = extend_heap(extendsize/DSIZE)) == NULL)
         return NULL;
     place(bp, asize);
     return bp;
@@ -198,7 +199,13 @@ void *realloc(void *ptr, size_t size)
  */
 void mm_checkheap(int lineno)
 {
-    lineno = lineno; /* keep gcc happy */
+    printf("We are at line %d\n",lineno);
+    void *bp;
+    
+    for (bp=GET(root); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = GET(AD_NEXT(bp))) {
+        printf("address:%p, size :%d\n",bp,GET_SIZE(HDRP(bp)));
+    }
+    printf("Over-------------------\n");
 }
 
 /*
@@ -243,7 +250,6 @@ static void *coalesce(void *bp)
     /*LIFO Policy*/
 
     if (prev_alloc && next_alloc) {            /* Case 1 */
-     
         
     }
     
@@ -252,8 +258,6 @@ static void *coalesce(void *bp)
         delete_list(NEXT_BLKP(bp));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size,0));
-        
-       
         
     }
     
@@ -288,7 +292,8 @@ static void *coalesce(void *bp)
 }
 
 /* insert_list - insert a node into the head of the list
-    A small trick to reduce operations by first_node->pre=NULL*/
+    1.A small trick to reduce operations by first_node->pre=NULL
+    2.obey "LIFO"    */
 inline void insert_list(void *bp){
     char *t=GET(root);
     if(t==NULL){
