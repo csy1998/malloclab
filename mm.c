@@ -24,9 +24,8 @@
  * If NEXT_FIT defined use next fit search, else use first-fit search
  */
 #define NEXT_FITx
-static long basis=0;
-#define W2D(bp)  (char *)(basis+bp)
-#define D2W(bp)  (bp-basis)
+#define int_to_ptr(bp)  ((bp)? heap_listp+bp :NULL)
+#define ptr_to_int(bp)  ((bp)? ((char*)(bp)-heap_listp):0)
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
 #define DSIZE       8       /* Double word size (bytes) */
@@ -53,8 +52,8 @@ static long basis=0;
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
-#define AD_NEXT(bp)    ((char *)(bp))
-#define AD_PREV(bp)    ((char *)bp+WSIZE)
+#define AD_NEXT(bp)    ((char *)(bp))    //return the address of next pointer
+#define AD_PREV(bp)    ((char *)bp+WSIZE)  //return the addresso of prev pointer
 
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */
@@ -82,17 +81,15 @@ int mm_init(void)
     /* Create the initial empty heap */
     if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
         return -1;
-    basis=(long)heap_listp;
     PUT(heap_listp, 0);                          /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), 0); 		/* head pointer of the explicit free list*/
+    PUT(heap_listp + (2*WSIZE), 0);
     PUT(heap_listp + (3*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
     PUT(heap_listp + (4*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
     PUT(heap_listp + (5*WSIZE), PACK(0, 1));     /* Epilogue header */
     root=heap_listp+WSIZE;   //initiate head of the list
     heap_listp += (4*WSIZE);
-#ifdef NEXT_FIT
-    rover = heap_listp;
-#endif
+
     
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/DSIZE) == NULL)
@@ -160,8 +157,8 @@ void free(void *bp)
     PUT(FTRP(bp), PACK(size, 0));
     
     /*initiate the block before calling coalesce()*/
-    PUT(AD_PREV(bp), NULL);
-    PUT(AD_NEXT(bp), NULL);
+    PUT(AD_PREV(bp), 0);
+    PUT(AD_NEXT(bp), 0);
 #ifdef Debug
     mm_checkheap(__LINE__);
 #endif
@@ -184,10 +181,10 @@ void *realloc(void *ptr, size_t size)
     
     /* If oldptr is NULL, then this is just malloc. */
     if(ptr == NULL) {
-        return mm_malloc(size);
+        return malloc(size);
     }
     
-    newptr = mm_malloc(size);
+    newptr = malloc(size);
     
     /* If realloc() fails the original block is left untouched  */
     if(!newptr) {
@@ -213,13 +210,13 @@ void *realloc(void *ptr, size_t size)
 /*
  * extend_heap - Extend heap with free block and return its block pointer
  */
-static void *extend_heap(size_t words)
+static void *extend_heap(size_t dwords)
 {
     char *bp;
     size_t size;
     
     /* Allocate an even number of words to maintain alignment */
-    size = (words % 2) ? (words+1) * DSIZE : words * DSIZE;
+    size = (dwords % 2) ? (dwords+1) * DSIZE : dwords * DSIZE;
     if ((long)(bp = mem_sbrk(size)) == -1)
         return NULL;
     
@@ -231,8 +228,8 @@ static void *extend_heap(size_t words)
     
     
     /*initiate the block before calling coalesce()*/
-    PUT(AD_PREV(bp), NULL);
-    PUT(AD_NEXT(bp), NULL);
+    PUT(AD_PREV(bp), 0);
+    PUT(AD_NEXT(bp), 0);
     /* Coalesce if the previous block was free */
     return coalesce(bp);
 }
@@ -241,12 +238,12 @@ static void *extend_heap(size_t words)
  * coalesce - Boundary tag coalescing. Return ptr to coalesced block
  */
 static void *coalesce(void *bp)
-{	bp=W2D(bp);
+{
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
     /*LIFO Policy*/
-
+    
     if (prev_alloc && next_alloc) {            /* Case 1 */
         
     }
@@ -264,7 +261,7 @@ static void *coalesce(void *bp)
         delete_list(PREV_BLKP(bp));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-      
+        
         
         bp = PREV_BLKP(bp);
         
@@ -293,38 +290,37 @@ static void *coalesce(void *bp)
 }
 
 /* insert_list - insert a node into the head of the list
-    1.A small trick to reduce operations by first_node->pre=NULL
-    2.obey "LIFO"    */
+ 1.A small trick to reduce operations by first_node->pre=NULL
+ 2.obey "LIFO"    */
 inline void insert_list(void *bp){
-	bp=W2D(bp);
-    char *t=GET(root);
-    if(t==NULL){
-        PUT(root, bp);
+    int t=GET(root);
+    if(t==0){
+        PUT(root, ptr_to_int(bp));
     }
     else{
-        PUT(root, bp);    //root->next=bp
-        PUT(W2D(AD_NEXT(bp)), t);   //bp->next=t
-        PUT(W2D(AD_PREV(t)), bp);   //t->pre=bp;
+        PUT(root, ptr_to_int(bp));    //root->next=bp
+        PUT(AD_NEXT(bp), t);   //bp->next=t
+        PUT(AD_PREV(int_to_ptr(t)), ptr_to_int(bp));   //t->pre=bp;
     }
 }
 
 /* delete_list - delete a node from the list*/
 inline void delete_list(void *bp){
-    bp=W2D(bp);
-    char * prevp=GET(AD_PREV(bp));
-    char * nextp=GET(AD_NEXT(bp));
+
+    char * prevp=int_to_ptr(GET((AD_PREV(bp))));
+    char * nextp=int_to_ptr(GET((AD_NEXT(bp))));
     //if it is the first node
     if(prevp==NULL){
-        PUT(root, D2W(nextp));
-        if(nextp!=NULL) PUT(W2D(AD_PREV(nextp)), NULL);
+        PUT(root, ptr_to_int(nextp));
+        if(nextp!=NULL) PUT(AD_PREV(nextp),0);
     }
     else{
-        PUT(W2D(AD_NEXT(prevp)), D2W(nextp));
-        if(nextp!=NULL) PUT(W2D(AD_PREV(nextp)), D2W(prevp));
+        PUT(AD_NEXT(prevp), ptr_to_int(nextp));
+        if(nextp!=NULL) PUT(AD_PREV(nextp), ptr_to_int(prevp));
     }
     
-    PUT(W2D(AD_PREV(bp)), NULL);
-    PUT(W2D(AD_NEXT(bp)), NULL);
+    PUT(AD_PREV(bp), 0);
+    PUT(AD_NEXT(bp), 0);
 }
 
 
@@ -334,7 +330,7 @@ inline void delete_list(void *bp){
  */
 static void place(void *bp, size_t asize)
 {
-    bp=W2D(bp);//change!!
+    
     size_t csize = GET_SIZE(HDRP(bp));
     if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(csize-asize, 0));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
@@ -344,7 +340,7 @@ static void place(void *bp, size_t asize)
         PUT(FTRP(bp), PACK(asize, 1));
     }
     else {
-        delete_list(D2W(bp));
+        delete_list(bp);
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
@@ -358,32 +354,16 @@ static void place(void *bp, size_t asize)
  */
 static void *find_fit(size_t asize)
 {
-#ifdef NEXT_FIT
-    /* Next fit search */
-    char *oldrover = rover;
-    
-    /* Search from the rover to the end of list */
-    for ( ; GET_SIZE(HDRP(rover)) > 0; rover = NEXT_BLKP(rover))
-        if (!GET_ALLOC(HDRP(rover)) && (asize <= GET_SIZE(HDRP(rover))))
-            return rover;
-    
-    /* search from start of list to old rover */
-    for (rover = heap_listp; rover < oldrover; rover = NEXT_BLKP(rover))
-        if (!GET_ALLOC(HDRP(rover)) && (asize <= GET_SIZE(HDRP(rover))))
-            return rover;
-    
-    return NULL;  /* no fit found */
-#else
+
     /* First-fit search */
     void *bp;
-    
-    for (bp=W2D(GET(root)); bp!=W2D(0) && GET_SIZE(HDRP(bp)) > 0; bp = W2D(GET(((AD_NEXT(bp)))))) {
+    for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
         if ((asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
     }
     return NULL; /* No fit */
-#endif
+
 }
 
 /*
@@ -396,10 +376,9 @@ void mm_checkheap(int lineno)
     printf("We are at line %d\n",lineno);
     void *bp;
     
-    for (bp=W2D(GET(root)); bp!=W2D(0) && GET_SIZE(HDRP(bp)) > 0; ) {
+    for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
         printf("address:%p\n",bp);
-	bp = W2D(GET(AD_NEXT(bp)));
-printf("address:%p\n",bp);
+        
     }
     printf("Over-------------------\n");
 }
