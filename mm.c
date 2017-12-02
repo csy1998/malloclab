@@ -67,7 +67,6 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
-static char * root=NULL;
 static void insert_list(void *bp);
 static void delete_list(void *bp);
 static char *seg_list[30];
@@ -80,18 +79,21 @@ static char* seg_root(int asize);
 int mm_init(void)
 {
     /* Create the initial empty heap */
-    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
+    if ((heap_listp = mem_sbrk(34*WSIZE)) == (void *)-1)
         return -1;
-
+    
     PUT(heap_listp, 0);                          /* Alignment padding */
-    PUT(heap_listp + (1*WSIZE), 0); 		/* head pointer of the explicit free list*/
-    PUT(heap_listp + (2*WSIZE), 0);
-    PUT(heap_listp + (3*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
-    PUT(heap_listp + (4*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
-    PUT(heap_listp + (5*WSIZE), PACK(0, 1));     /* Epilogue header */
-    root=heap_listp+WSIZE;   //initiate head of the list
-    heap_listp += (4*WSIZE);
+    for(int i=0;i<30;i++){
+        PUT(heap_listp + (i*WSIZE),0);
+        seg_list[i]=heap_listp+(i*WSIZE);
+    }
+    PUT(heap_listp + (30*WSIZE),0);
+    PUT(heap_listp + (31*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
+    PUT(heap_listp + (32*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
+    PUT(heap_listp + (33*WSIZE), PACK(0, 1));     /* Epilogue header */
 
+    heap_listp += (32*WSIZE);
+    
     
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
@@ -102,13 +104,13 @@ int mm_init(void)
     return 0;
 }
 char* seg_root(int asize){
-	if(asize<=8) return seg_list[0];
-	int i,cnt=0;
-	for(i=1;i<=asize;i*=2){
-		cnt++;
-	}
-	cnt-=3;
-	return seg_list[cnt];
+    if(asize<=8) return seg_list[0];
+    int i,cnt=0;
+    for(i=1;i<asize;i=i<<1){
+        cnt++;
+    }
+    cnt-=3;
+    return seg_list[cnt];
 }
 /*
  * malloc - Allocate a block with at least size bytes of payload
@@ -118,9 +120,9 @@ void *malloc(size_t size)
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     char *bp;
-
-
-
+    
+    
+    
     //printf("ask for %d\n",size);
     if (heap_listp == 0){
         mm_init();
@@ -137,7 +139,7 @@ void *malloc(size_t size)
     
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) {
-
+        
         place(bp, asize);
         return bp;
     }
@@ -146,9 +148,9 @@ void *malloc(size_t size)
     extendsize = MAX(asize,CHUNKSIZE);
     if ((bp = extend_heap(extendsize/DSIZE)) == NULL)
         return NULL;
-
+    
     place(bp, asize);
-	
+    
 #ifdef Debug
     mm_checkheap(__LINE__);
 #endif
@@ -296,12 +298,7 @@ static void *coalesce(void *bp)
 #ifdef Debug
     mm_checkheap(__LINE__);
 #endif
-#ifdef NEXT_FIT
-    /* Make sure the rover isn't pointing into the free block */
-    /* that we just coalesced */
-    if ((rover > (char *)bp) && (rover < NEXT_BLKP(bp)))
-        rover = bp;
-#endif
+
     return bp;
 }
 
@@ -309,6 +306,8 @@ static void *coalesce(void *bp)
  1.A small trick to reduce operations by first_node->pre=NULL
  2.obey "LIFO"    */
 inline void insert_list(void *bp){
+    int size=GET_SIZE(bp);
+    char *root=seg_root(size);
     int t=GET(root);
     if(t==0){
         PUT(root, ptr_to_int(bp));
@@ -322,7 +321,8 @@ inline void insert_list(void *bp){
 
 /* delete_list - delete a node from the list*/
 inline void delete_list(void *bp){
-
+    int size=GET_SIZE(bp);
+    char *root=seg_root(size);
     char * prevp=int_to_ptr(GET((AD_PREV(bp))));
     char * nextp=int_to_ptr(GET((AD_NEXT(bp))));
     //if it is the first node
@@ -347,18 +347,18 @@ inline void delete_list(void *bp){
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
-	delete_list(bp);
+    delete_list(bp);
     if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(asize, 1));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
-	
+        
         PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize-asize, 0));
         PUT(FTRP(bp), PACK(csize-asize, 0));
-	PUT(AD_PREV(bp), 0);
-    	PUT(AD_NEXT(bp), 0);
-coalesce(bp);											
-
+        PUT(AD_PREV(bp), 0);
+        PUT(AD_NEXT(bp), 0);
+        coalesce(bp);
+        
     }
     else {
         
@@ -375,16 +375,17 @@ coalesce(bp);
  */
 static void *find_fit(size_t asize)
 {
-
+    
     /* First-fit search */
     void *bp;
+    char *root=seg_root(asize);
     for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
         if ((asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
     }
     return NULL; /* No fit */
-
+    
 }
 
 /*
@@ -396,7 +397,7 @@ void mm_checkheap(int lineno)
 {
     printf("We are at line %d\n",lineno);
     void *bp;
-    
+    char *root=seg_list[0];
     for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
         printf("address:%p size:%d,the next is:%p\n",bp,GET_SIZE(HDRP(bp)) , int_to_ptr(GET(AD_NEXT(bp))));
         
