@@ -70,7 +70,7 @@ static void *coalesce(void *bp);
 static void insert_list(void *bp);
 static void delete_list(void *bp);
 static char *seg_list[30];
-static char* seg_root(int asize);
+static int seg_root(int asize);
 /*Noted that first_node->pre=NULL, last_node->next=NULL*/
 
 /*
@@ -103,14 +103,14 @@ int mm_init(void)
 #endif
     return 0;
 }
-char* seg_root(int asize){
-    if(asize<=8) return seg_list[0];
+int seg_root(int asize){
+    if(asize<=8) return 0;
     int i,cnt=0;
     for(i=1;i<asize;i=i<<1){
         cnt++;
     }
     cnt-=3;
-    return seg_list[cnt];
+    return cnt;
 }
 /*
  * malloc - Allocate a block with at least size bytes of payload
@@ -378,11 +378,16 @@ static void *find_fit(size_t asize)
     
     /* First-fit search */
     void *bp;
-    char *root=seg_root(asize);
-    for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
-        if ((asize <= GET_SIZE(HDRP(bp)))) {
-            return bp;
+    int root_id=seg_root(asize);
+    char *root;
+    while(root_id<30){
+        root=seg_list[root_id];
+        for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
+            if ((asize <= GET_SIZE(HDRP(bp)))) {
+                return bp;
+            }
         }
+        root_id++;//find the next seg list
     }
     return NULL; /* No fit */
     
