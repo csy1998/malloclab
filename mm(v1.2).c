@@ -2,6 +2,7 @@
  * Aaron Xu
  * version 1.2
  * seg +first fit
+ *try something new!
  */
 #include <stdio.h>
 #include <string.h>
@@ -34,11 +35,13 @@
 #define MIN(x, y) ((x) < (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
 #define PACK(size, alloc)  ((size) | (alloc))
-
+#define PACKA(size,pre,alloc)  ((size)|(alloc)|(pre<<1))
 /* Read and write a word at address p */
 #define GET(p)       (*(unsigned int *)(p))
 #define PUT(p, val)  (*(unsigned int *)(p) = (val))
-
+#define PUTA(p)     (*(unsigned int *)(p) = *(unsigned int *)(p)+0x2)
+#define PUTF(p)      (*(unsigned int *)(p) = *(unsigned int *)(p)-0x2)
+#define GETA(p)     (*(unsigned int *)(p))&0x2
 /* Read the size and allocated fields from address p */
 #define GET_SIZE(p)  (GET(p) & ~0x7)
 #define GET_ALLOC(p) (GET(p) & 0x1)
@@ -86,12 +89,12 @@ int mm_init(void)
         PUT(heap_listp + (i*WSIZE),0);
         seg_list[i]=heap_listp+(i*WSIZE);
     }
-
+    
     PUT(heap_listp + (30*WSIZE),0);
     PUT(heap_listp + (31*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
     PUT(heap_listp + (32*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
     PUT(heap_listp + (33*WSIZE), PACK(0, 1));     /* Epilogue header */
-
+    
     heap_listp += (32*WSIZE);
     
     
@@ -132,10 +135,10 @@ void *malloc(size_t size)
         return NULL;
     
     /* Adjust block size to include overhead and alignment reqs. */
-    if (size <= DSIZE)
-        asize = 2*DSIZE;
+    if (size <= WSIZE)
+        asize = DSIZE;
     else
-        asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+        asize = DSIZE * ((size + WSIZE + (DSIZE-1)) / DSIZE);
     
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) {
@@ -173,7 +176,7 @@ void free(void *bp)
     
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    
+    PUTF(HDRP(NEXT_BLKP(bp)));
     /*initiate the block before calling coalesce()*/
     PUT(AD_PREV(bp), 0);
     PUT(AD_NEXT(bp), 0);
@@ -244,12 +247,12 @@ static void *extend_heap(size_t dwords)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
     
     
-   // printf("ex:%d %d\n",GET_SIZE(HDRP(bp)),size);
+    // printf("ex:%d %d\n",GET_SIZE(HDRP(bp)),size);
     /*initiate the block before calling coalesce()*/
     PUT(AD_PREV(bp), 0);
     PUT(AD_NEXT(bp), 0);
     /* Coalesce if the previous block was free */
-
+    
     return coalesce(bp);
 }
 
@@ -257,8 +260,9 @@ static void *extend_heap(size_t dwords)
  * coalesce - Boundary tag coalescing. Return ptr to coalesced block
  */
 static void *coalesce(void *bp)
-{	
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+{
+    int a=GETA(HDRP(bp));   //a==1 allocated!
+    size_t prev_alloc = (a)? 1:0;
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
     /*LIFO Policy*/
@@ -295,12 +299,12 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
-
+    
     insert_list(bp);
 #ifdef Debug
     mm_checkheap(__LINE__);
 #endif
-
+    
     return bp;
 }
 
@@ -309,10 +313,10 @@ static void *coalesce(void *bp)
  2.obey "LIFO"    */
 inline void insert_list(void *bp){
     int size=GET_SIZE(HDRP(bp));
-
+    
     char *root=seg_list[seg_root(size)];
     int t=GET(root);
-	//printf("insert:rootid:%d size:%d\n",seg_root(size),size);
+    //printf("insert:rootid:%d size:%d\n",seg_root(size),size);
     if(t==0){
         PUT(root, ptr_to_int(bp));
     }
@@ -330,7 +334,7 @@ inline void insert_list(void *bp){
 inline void delete_list(void *bp){
     int size=GET_SIZE(HDRP(bp));
     char *root=seg_list[seg_root(size)];
-	//printf("delete:rootid:%d size:%d\n",seg_root(size),size);
+    //printf("delete:rootid:%d size:%d\n",seg_root(size),size);
     char * prevp=int_to_ptr(GET((AD_PREV(bp))));
     char * nextp=int_to_ptr(GET((AD_NEXT(bp))));
     //if it is the first node
@@ -358,20 +362,17 @@ static void place(void *bp, size_t asize)
     delete_list(bp);
     if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(asize, 1));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
-        
-        PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(csize-asize, 0));
-        PUT(FTRP(bp), PACK(csize-asize, 0));
+        PUT(HDRP(bp), PACKA(csize-asize,1,0));
+        PUT(FTRP(bp), PACK(csize-asize,0));
         PUT(AD_PREV(bp), 0);
         PUT(AD_NEXT(bp), 0);
         coalesce(bp);
         
     }
     else {
-        
         PUT(HDRP(bp), PACK(csize, 1));
-        PUT(FTRP(bp), PACK(csize, 1));
+        PUTA(HDRP(NEXT_BLKP(bp)));
     }
 #ifdef Debug
     mm_checkheap(__LINE__);
@@ -389,10 +390,10 @@ static void *find_fit(size_t asize)
     int root_id=seg_root(asize);
     char *root;
     while(root_id<30){
-	
+        
         root=seg_list[root_id];
         for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
-		//printf("rootid:%d %d\n",root_id,GET_SIZE(HDRP(bp)));
+            //printf("rootid:%d %d\n",root_id,GET_SIZE(HDRP(bp)));
             if ((asize <= GET_SIZE(HDRP(bp)))) {
                 return bp;
             }
@@ -419,4 +420,3 @@ void mm_checkheap(int lineno)
     }
     printf("Over-------------------\n");
 }
-
