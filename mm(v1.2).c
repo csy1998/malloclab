@@ -39,6 +39,7 @@
 /* Read and write a word at address p */
 #define GET(p)       (*(unsigned int *)(p))
 #define PUT(p, val)  (*(unsigned int *)(p) = (val))
+#define PUTN(p, val)  (*(unsigned int *)(p) = (val)|GETA(p))
 #define PUTA(p)     (*(unsigned int *)(p) = *(unsigned int *)(p)+0x2)
 #define PUTF(p)      (*(unsigned int *)(p) = *(unsigned int *)(p)-0x2)
 #define GETA(p)     (*(unsigned int *)(p))&0x2
@@ -93,7 +94,7 @@ int mm_init(void)
     PUT(heap_listp + (30*WSIZE),0);
     PUT(heap_listp + (31*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
     PUT(heap_listp + (32*WSIZE), PACK(DSIZE, 1));     /* prologue  header */
-    PUT(heap_listp + (33*WSIZE), PACK(0, 1));     /* Epilogue header */
+    PUT(heap_listp + (33*WSIZE), PACKA(0,1,1));     /* Epilogue header */
     
     heap_listp += (32*WSIZE);
     
@@ -173,9 +174,9 @@ void free(void *bp)
         mm_init();
     }
     
-    
-    PUT(HDRP(bp), PACK(size, 0));
+    PUTN(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
+    
     PUTF(HDRP(NEXT_BLKP(bp)));
     /*initiate the block before calling coalesce()*/
     PUT(AD_PREV(bp), 0);
@@ -242,9 +243,9 @@ static void *extend_heap(size_t dwords)
         return NULL;
     
     /* Initialize free block header/footer and the epilogue header */
-    PUT(HDRP(bp), PACK(size, 0));         /* Free block header */
+    PUTN(HDRP(bp), PACK(size, 0));         /* Free block header */
     PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
+    PUT(HDRP(NEXT_BLKP(bp)), PACKA(0,0,1)); /* New epilogue header */
     
     
     // printf("ex:%d %d\n",GET_SIZE(HDRP(bp)),size);
@@ -274,7 +275,7 @@ static void *coalesce(void *bp)
     else if (prev_alloc && !next_alloc) {      /* Case 2 */
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         delete_list(NEXT_BLKP(bp));
-        PUT(HDRP(bp), PACK(size, 0));
+        PUTN(HDRP(bp), PACK(size,0));
         PUT(FTRP(bp), PACK(size,0));
         
     }
@@ -283,7 +284,7 @@ static void *coalesce(void *bp)
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         delete_list(PREV_BLKP(bp));
         PUT(FTRP(bp), PACK(size, 0));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUTN(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         
         
         bp = PREV_BLKP(bp);
@@ -295,7 +296,7 @@ static void *coalesce(void *bp)
         
         delete_list(PREV_BLKP(bp));
         delete_list(NEXT_BLKP(bp));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUTN(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
@@ -361,8 +362,9 @@ static void place(void *bp, size_t asize)
     size_t csize = GET_SIZE(HDRP(bp));
     delete_list(bp);
     if ((csize - asize) >= (2*DSIZE)) {
-        PUT(HDRP(bp), PACK(asize, 1));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
+        PUTN(HDRP(bp), PACK(asize, 1));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
         bp = NEXT_BLKP(bp);
+        
         PUT(HDRP(bp), PACKA(csize-asize,1,0));
         PUT(FTRP(bp), PACK(csize-asize,0));
         PUT(AD_PREV(bp), 0);
@@ -371,7 +373,7 @@ static void place(void *bp, size_t asize)
         
     }
     else {
-        PUT(HDRP(bp), PACK(csize, 1));
+        PUTN(HDRP(bp), PACK(csize, 1));
         PUTA(HDRP(NEXT_BLKP(bp)));
     }
 #ifdef Debug
