@@ -19,7 +19,7 @@
 #define realloc mm_realloc
 #define calloc mm_calloc
 #endif /* def DRIVER */
-#define Debug
+#define Debugx
 /*
  * If NEXT_FIT defined use next fit search, else use first-fit search
  */
@@ -32,7 +32,7 @@
 #define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
-
+#define MIN(x, y) ((x) < (y)? (x) : (y))
 /* Pack a size and allocated bit into a word */
 #define PACK(size, alloc)  ((size) | (alloc))
 
@@ -70,7 +70,8 @@ static void *coalesce(void *bp);
 static char * root=NULL;
 static void insert_list(void *bp);
 static void delete_list(void *bp);
-
+static char *seg_list[30];
+static char* seg_root(int asize);
 /*Noted that first_node->pre=NULL, last_node->next=NULL*/
 
 /*
@@ -81,6 +82,7 @@ int mm_init(void)
     /* Create the initial empty heap */
     if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
         return -1;
+
     PUT(heap_listp, 0);                          /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), 0); 		/* head pointer of the explicit free list*/
     PUT(heap_listp + (2*WSIZE), 0);
@@ -92,14 +94,22 @@ int mm_init(void)
 
     
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if (extend_heap(CHUNKSIZE/DSIZE) == NULL)
+    if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
         return -1;
 #ifdef Debug
     mm_checkheap(__LINE__);
 #endif
     return 0;
 }
-
+char* seg_root(int asize){
+	if(asize<=8) return seg_list[0];
+	int i,cnt=0;
+	for(i=1;i<=asize;i*=2){
+		cnt++;
+	}
+	cnt-=3;
+	return seg_list[cnt];
+}
 /*
  * malloc - Allocate a block with at least size bytes of payload
  */
@@ -108,7 +118,10 @@ void *malloc(size_t size)
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     char *bp;
-    
+
+
+
+    //printf("ask for %d\n",size);
     if (heap_listp == 0){
         mm_init();
     }
@@ -124,6 +137,7 @@ void *malloc(size_t size)
     
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) {
+
         place(bp, asize);
         return bp;
     }
@@ -132,7 +146,9 @@ void *malloc(size_t size)
     extendsize = MAX(asize,CHUNKSIZE);
     if ((bp = extend_heap(extendsize/DSIZE)) == NULL)
         return NULL;
+
     place(bp, asize);
+	
 #ifdef Debug
     mm_checkheap(__LINE__);
 #endif
@@ -330,17 +346,22 @@ inline void delete_list(void *bp){
  */
 static void place(void *bp, size_t asize)
 {
-    
     size_t csize = GET_SIZE(HDRP(bp));
+	delete_list(bp);
     if ((csize - asize) >= (2*DSIZE)) {
-        PUT(HDRP(bp), PACK(csize-asize, 0));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
-        PUT(FTRP(bp), PACK(csize-asize, 0));
-        bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(HDRP(bp), PACK(asize, 1));  /*a very useful trick: allocate the latter part of the free block, so don't need to change the pointer*/
+	
         PUT(FTRP(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize-asize, 0));
+        PUT(FTRP(bp), PACK(csize-asize, 0));
+	PUT(AD_PREV(bp), 0);
+    	PUT(AD_NEXT(bp), 0);
+coalesce(bp);											
+
     }
     else {
-        delete_list(bp);
+        
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
@@ -377,7 +398,7 @@ void mm_checkheap(int lineno)
     void *bp;
     
     for (bp=int_to_ptr(GET(root)); bp!=NULL && GET_SIZE(HDRP(bp)) > 0; bp = int_to_ptr(GET(AD_NEXT(bp)))) {
-        printf("address:%p\n",bp);
+        printf("address:%p size:%d,the next is:%p\n",bp,GET_SIZE(HDRP(bp)) , int_to_ptr(GET(AD_NEXT(bp))));
         
     }
     printf("Over-------------------\n");
